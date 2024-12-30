@@ -20,4 +20,6 @@ test_input = torch.rand([10, input_tdim, 128])
 ast_mdl = ASTModel(label_dim=label_dim, input_tdim=input_tdim, imagenet_pretrain=True, audioset_pretrain=True)
 test_output = ast_mdl(test_input)
 # output should be in shape [10, 527], i.e., 10 samples, each with prediction of 527 classes.
-print(test_output.shape)
+print(test_output[0].shape)
+print(torch.count_nonzero(test_output[0]))
+
