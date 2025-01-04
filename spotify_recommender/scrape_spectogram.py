@@ -1,20 +1,23 @@
 import requests
+import os
+import sys
 import json
-import numpy as np
-import matplotlib.pyplot as plt
-import librosa
-import librosa.display
-import soundfile as sf
 import io
 import torchaudio
 from bs4 import BeautifulSoup
+import torch
+import numpy as np
 
-# Spotify Embed URL pattern
-EMBED_URL = "https://open.spotify.com/embed/track/"
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from egs.audioset.inference import make_features, load_label
+from src.models import ASTModel
 
 # Step 1: Scrape Spotify embed for song details
 def get_song_info_from_embed(song_id):
-    embed_url = f"{EMBED_URL}{song_id}"
+    # Spotify Embed URL pattern
+    embed_prefix = "https://open.spotify.com/embed/track/"
+
+    embed_url = f"{embed_prefix}{song_id}"
     response = requests.get(embed_url)
 
     if response.status_code == 200:
@@ -42,7 +45,7 @@ def get_song_info_from_embed(song_id):
         return None
 
 # Step 2: Generate and plot a spectrogram from an audio preview URL
-def plot_spectrogram_from_preview(preview_url):
+def generate_spectogram(preview_url):
     if not preview_url:
         print("No preview URL provided.")
         return
@@ -62,39 +65,36 @@ def plot_spectrogram_from_preview(preview_url):
                 orig_freq=sr, new_freq=16e3
                 )(audio) 
 
-        print(audio.shape)
-        audio = np.array(audio.mean(axis=0))
-        print(audio.shape)
-
-        # Generate spectrogram
-        print("Generating spectrogram...")
-        spectrogram = librosa.stft(audio, n_fft=2048)
-        spectrogram_db = librosa.amplitude_to_db(np.abs(spectrogram))
-
-        # Plot the spectrogram
-        plt.figure(figsize=(10, 6))
-        librosa.display.specshow(spectrogram_db, sr=sr, x_axis='time', y_axis='log', cmap='magma')
-        plt.colorbar(format="%+2.0f dB")
-        plt.title("Spectrogram")
-        plt.xlabel("Time (s)")
-        plt.ylabel("Frequency (log(Hz))")
-        plt.tight_layout()
-        plt.show()
-    else:
-        print(f"Failed to download audio preview. Status code: {response.status_code}")
+    return make_features(audio, mel_bins=128)
+        
 
 if __name__ == "__main__":
-    print("--- Spotify Song Info Retriever ---")
+    print("--- Spotify Sound predictor.---")
 
     songs_with_url = [
-        '2BOUrjXoRIo2YHVAyZyXVX',
-        '43Vb1wOGyRfk7fsZ5ZLRH8',
-        '0TCC2Kwusv749hTFrO7d9Q',
-        '3DK6m7It6Pw857FcQftMds'
+        '3DK6m7It6Pw857FcQftMds', # runaway kanye west
+        '7a1XGxwYRr3YUW3NpKrBDX', # birds in a forest
+        '3GCdLUSnKSMJhs4Tj6CV3s', # all the stars 
+        '186bI2lE3fYyyuCaXtn7Ic', # car sounds
         ]
 
-    for song in songs_with_url:
+    # define path and settings    
+    pretrained_mdl_path = '../pretrained_models/audioset_10_10_0.4593.pth'
+    fstride, tstride = int(pretrained_mdl_path.split('/')[-1].split('_')[1]), int(pretrained_mdl_path.split('/')[-1].split('_')[2].split('.')[0])
 
+    # initialize an AST model
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    sd = torch.load(pretrained_mdl_path, map_location=device, weights_only=True)
+    audio_model = ASTModel(input_tdim=1024, fstride=fstride, tstride=tstride,
+                            imagenet_pretrain=False, audioset_pretrain=False)
+    audio_model = torch.nn.DataParallel(audio_model)
+    audio_model.load_state_dict(sd, strict=False)
+
+    # 4. map the post-prob to label
+    label_csv = '../egs/audioset/data/class_labels_indices.csv'
+    labels = load_label(label_csv)
+
+    for song in songs_with_url:
         song_info = get_song_info_from_embed(song)
 
         if song_info:
@@ -103,7 +103,27 @@ if __name__ == "__main__":
             print(f"Artist: {song_info['artist']}")
             print(f"Preview URL: {song_info['preview_url']}")
 
-            # Plot spectrogram from preview URL
-            plot_spectrogram_from_preview(song_info['preview_url'])
+            #generate spectogram
+            feats = generate_spectogram(song_info['preview_url'])
+            input_tdim = feats.shape[0]
+
+            # 3. feed the data feature to model
+            feats_data = feats.expand(1, input_tdim, 128)           # reshape the feature
+
+            audio_model.eval()                                      # set the eval model
+            with torch.no_grad():
+                output = audio_model.forward(feats_data)
+                output = torch.sigmoid(output)
+            result_output = output.data.cpu().numpy()[0]
+
+            sorted_indexes = np.argsort(result_output)[::-1]
+
+            # Print audio tagging top probabilities
+            print('[*INFO] predice results:')
+            for k in range(10):
+                print('{}: {:.4f}'.format(np.array(labels)[sorted_indexes[k]],
+                                        result_output[sorted_indexes[k]])) 
+
         else:
             print("No song found with the given ID or an error occurred.")
+

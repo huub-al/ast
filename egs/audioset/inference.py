@@ -11,7 +11,7 @@ import numpy as np
 import torch
 import torchaudio
 
-torchaudio.set_audio_backend("soundfile")       # switch backend
+# torchaudio.set_audio_backend("soundfile")       # switch backend
 basepath = os.path.dirname(os.path.dirname(sys.path[0]))
 sys.path.append(basepath)
 from src.models import ASTModel
@@ -20,11 +20,10 @@ from src.models import ASTModel
 os.environ['TORCH_HOME'] = '../pretrained_models'
 
 
-def make_features(wav_name, mel_bins, target_length=1024):
-    waveform, sr = torchaudio.load(wav_name)
+def make_features(waveform, mel_bins, target_length=1024):
 
     fbank = torchaudio.compliance.kaldi.fbank(
-        waveform, htk_compat=True, sample_frequency=sr, use_energy=False,
+        waveform, htk_compat=True, sample_frequency=16e3, use_energy=False,
         window_type='hanning', num_mel_bins=mel_bins, dither=0.0,
         frame_shift=10)
 
