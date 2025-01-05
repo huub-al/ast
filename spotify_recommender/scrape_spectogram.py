@@ -1,3 +1,7 @@
+# 4 - 1 - 2025
+# Huub Al
+# python script that generates spectograms based on song id.
+
 import requests
 import os
 import sys
@@ -83,7 +87,7 @@ if __name__ == "__main__":
     fstride, tstride = int(pretrained_mdl_path.split('/')[-1].split('_')[1]), int(pretrained_mdl_path.split('/')[-1].split('_')[2].split('.')[0])
 
     # initialize an AST model
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("mps" if torch.mps.is_available() else "cpu")
     sd = torch.load(pretrained_mdl_path, map_location=device, weights_only=True)
     audio_model = ASTModel(input_tdim=1024, fstride=fstride, tstride=tstride,
                             imagenet_pretrain=False, audioset_pretrain=False)
